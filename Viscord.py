@@ -229,7 +229,7 @@ def save_public_message(room_uid, sender, content, msg_date):
             "content": content,
             "msg_date": msg_date,
             "timestamp": time.time()
-        })
+        }).execute()
     except Exception as error:
         print("Warning: failed to save public message:", error)
 
