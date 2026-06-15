@@ -103,6 +103,14 @@ if !INSTALLED! EQU 0 (
 :: Check and install dependencies
 call :check_dependencies
 
+:: Print installed version before launch
+if exist version.txt (
+    for /f "usebackq delims=" %%V in ("version.txt") do set "LOCAL_VERSION=%%V"
+) else (
+    set "LOCAL_VERSION=unknown"
+)
+call :status "Current installed version: !LOCAL_VERSION!"
+
 :: Final launch
 if not exist Viscord.py (
     call :error "Viscord.py not found."
@@ -166,14 +174,18 @@ exit /b 0
     for /f "usebackq delims=" %%B in ("remote_version.txt") do set "REMOTE=%%B"
     
     :: Use PowerShell for version comparison
-    powershell -Command "$local=[version]'!LOCAL!'; $remote=[version]'!REMOTE!'; exit [int]($local -lt $remote)" >nul 2>&1
-    if !errorlevel! EQU 0 (
+    powershell -Command "$ErrorActionPreference='Stop'; try { $local=[version]'!LOCAL!'; $remote=[version]'!REMOTE!'; if ($remote -gt $local) { exit 1 } else { exit 0 } } catch { exit 2 }" >nul 2>&1
+    if !errorlevel! EQU 1 (
         :: Version is older, update
         call :status "New version found (!REMOTE!). Updating..."
         call :download_and_install
         if !errorlevel! EQU 0 (
             call :success "Updated to !REMOTE!."
         )
+    ) else if !errorlevel! EQU 0 (
+        call :status "No update needed. Local version !LOCAL! is current."
+    ) else (
+        call :warning "Version comparison failed; skipping update to avoid downgrade."
     )
     
     del remote_version.txt
@@ -208,8 +220,26 @@ exit /b 0
     
     call :status "Installing repository..."
     
-    :: Exclude launcher from update to preserve local version
-    robocopy "install_temp\VISCORD-main" "." /E /XF Launch.bat >nul 2>&1
+    :: Preserve existing version.txt if local version is newer than remote
+    set "PRESERVE_VERSION=0"
+    if exist version.txt if exist "install_temp\VISCORD-main\version.txt" (
+        for /f "usebackq delims=" %%A in ("version.txt") do set "LOCAL=%%A"
+        for /f "usebackq delims=" %%B in ("install_temp\VISCORD-main\version.txt") do set "REMOTE=%%B"
+        powershell -Command "$ErrorActionPreference='Stop'; try { $local=[version]'!LOCAL!'; $remote=[version]'!REMOTE!'; if ($local -gt $remote) { exit 1 } else { exit 0 } } catch { exit 2 }" >nul 2>&1
+        if !errorlevel! EQU 1 (
+            set "PRESERVE_VERSION=1"
+            call :warning "Local version !LOCAL! is newer than remote !REMOTE!. Preserving version.txt."
+        ) else if !errorlevel! EQU 2 (
+            set "PRESERVE_VERSION=1"
+            call :warning "Version comparison failed during install. Preserving existing version.txt."
+        )
+    )
+    
+    if !PRESERVE_VERSION! EQU 1 (
+        robocopy "install_temp\VISCORD-main" "." /E /XF Launch.bat version.txt >nul 2>&1
+    ) else (
+        robocopy "install_temp\VISCORD-main" "." /E /XF Launch.bat >nul 2>&1
+    )
     
     :: Cleanup
     rmdir /S /Q install_temp >nul 2>&1
